@@ -1,0 +1,27 @@
+/* 3D Card Flip */
+.perspective-1000 { 
+    perspective: 1000px; 
+}
+.transform-style-3d { 
+    transform-style: preserve-3d; 
+}
+.backface-hidden { 
+    backface-visibility: hidden; 
+}
+.rotate-y-180 { 
+    transform: rotateY(180deg); 
+}
+.flipped .card-inner { 
+    transform: rotateY(180deg); 
+}
+
+/* Screen Shake (Trauma/Hit Post) */
+@keyframes shake { 
+    0%, 100% { transform: translateX(0); } 
+    25% { transform: translateX(-10px); } 
+    50% { transform: translateX(10px); } 
+    75% { transform: translateX(-10px); } 
+}
+.animate-shake { 
+    animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both; 
+}

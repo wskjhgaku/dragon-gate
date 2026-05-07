@@ -20,6 +20,7 @@ sio_app = socketio.ASGIApp(sio, other_asgi_app=app)
 # Global room state
 # Structure: { "room_id": { "room_id": "A1B2", "host_sid": "xxx", "players": [...], "status": "waiting" } }
 rooms = {}
+room_timers = {}
 
 def generate_room_id():
     """Generates a 4-character uppercase alphanumeric room ID."""
@@ -56,6 +57,9 @@ async def remove_player_from_room(sid, room_id):
         was_turn = False
         if room_data['status'] == 'playing' and player_idx == room_data['turn_index']:
             was_turn = True
+            timer_task = room_timers.get(room_id)
+            if timer_task and not timer_task.done():
+                timer_task.cancel()
             
         players.pop(player_idx)
         await sio.leave_room(sid, room_id)
@@ -100,7 +104,15 @@ async def disconnect(sid):
             break
 
 @sio.event
-async def create_room(sid, name):
+async def create_room(sid, data):
+    name = data.get('name', 'Anonymous') if isinstance(data, dict) else data
+    starting_chips = int(data.get('starting_chips', 1000)) if isinstance(data, dict) else 1000
+    ante = int(data.get('ante', 100)) if isinstance(data, dict) else 100
+    min_bet = int(data.get('min_bet', 50)) if isinstance(data, dict) else 50
+
+    if starting_chips < ante * 2 or ante < min_bet or min_bet < 10 or starting_chips % 10 != 0 or ante % 10 != 0 or min_bet % 10 != 0:
+        return await sio.emit('error', 'Invalid settings', to=sid)
+
     room_id = generate_room_id()
     # Ensure room_id uniqueness
     while room_id in rooms:
@@ -109,7 +121,10 @@ async def create_room(sid, name):
     rooms[room_id] = {
         "room_id": room_id,
         "host_sid": sid,
-        "players": [{"sid": sid, "name": name, "chips": 1100, "is_bot": False, "traumatized": False, "debt": 0, "revivals": 0}],
+        "starting_chips": starting_chips,
+        "ante": ante,
+        "min_bet": min_bet,
+        "players": [{"sid": sid, "name": name, "chips": starting_chips, "is_bot": False, "traumatized": False, "debt": 0, "revivals": 0}],
         "status": "waiting"
     }
     
@@ -126,16 +141,17 @@ async def join_room(sid, data):
     if room_id in rooms:
         room = rooms[room_id]
         if room['status'] == "playing":
-            room['players'].append({"sid": sid, "name": name, "chips": 1000, "is_bot": False, "traumatized": False, "debt": 0, "revivals": 0})
-            room['pot'] += 100
+            chips_amount = room['starting_chips'] - room['ante']
+            room['players'].append({"sid": sid, "name": name, "chips": chips_amount, "is_bot": False, "traumatized": False, "debt": 0, "revivals": 0})
+            room['pot'] += room['ante']
         else:
-            room['players'].append({"sid": sid, "name": name, "chips": 1100, "is_bot": False, "traumatized": False, "debt": 0, "revivals": 0})
+            room['players'].append({"sid": sid, "name": name, "chips": room['starting_chips'], "is_bot": False, "traumatized": False, "debt": 0, "revivals": 0})
             
         await sio.enter_room(sid, room_id)
         # Broadcast the new player list to everyone in the room
         await sio.emit('room_updated', room, room=room_id)
         if room['status'] == "playing":
-            await sio.emit('system_message', f"{name} joined the game and paid $100 entry fee!", room=room_id)
+            await sio.emit('system_message', f"{name} joined the game and paid ${room['ante']} entry fee!", room=room_id)
             await sio.emit('game_state_updated', room, room=room_id)
     else:
         # Emit an error event back to the joining user
@@ -151,7 +167,7 @@ async def add_bot(sid, data):
         room['players'].append({
             "sid": bot_sid,
             "name": bot_name,
-            "chips": 1100,
+            "chips": room['starting_chips'],
             "is_bot": True,
             "traumatized": False,
             "debt": 0,
@@ -174,10 +190,10 @@ async def bot_play_turn(room_id):
     
     global_max = min(bot['chips'] // 2, room['pot'])
     max_allowed = min(global_max, room['pot'] // 2) if gap == 2 else global_max
-    if max_allowed < 20:
+    if max_allowed < room['min_bet']:
         max_allowed = min(bot['chips'], room['pot'])
         if gap == 2: max_allowed = min(max_allowed, room['pot'] // 2)
-    min_allowed = min(20, max_allowed)
+    min_allowed = min(room['min_bet'], max_allowed)
     
     base_bet = max(min_allowed, (max_allowed // 10) * 10)
     bet_amount = 0
@@ -218,6 +234,37 @@ async def bot_play_turn(room_id):
     # Call place_bet logic directly
     await place_bet(bot['sid'], payload)
 
+async def player_timeout_task(room_id, sid, turn_idx):
+    try:
+        await asyncio.sleep(15.0)
+    except asyncio.CancelledError:
+        return
+        
+    room = rooms.get(room_id)
+    if not room or room['status'] != 'playing' or room['turn_index'] != turn_idx:
+        return
+        
+    player = room['players'][turn_idx]
+    if player['sid'] != sid:
+        return
+        
+    card1, card2 = room['current_cards']
+    gap = abs(card1 - card2)
+    
+    global_max = min(player['chips'] // 2, room['pot'])
+    max_allowed = min(global_max, room['pot'] // 2) if gap == 2 else global_max
+    if max_allowed < room['min_bet']:
+        max_allowed = min(player['chips'], room['pot'])
+        if gap == 2: max_allowed = min(max_allowed, room['pot'] // 2)
+    min_allowed = min(room['min_bet'], max_allowed)
+    
+    amount = min_allowed
+    guess = None
+    if gap == 0:
+        guess = random.choice(['high', 'low'])
+        
+    await place_bet(sid, {'room_id': room_id, 'amount': amount, 'guess': guess, 'is_auto': True})
+
 @sio.event
 async def start_game(sid, room_id):
     room = rooms.get(room_id)
@@ -231,7 +278,7 @@ async def start_game(sid, room_id):
     
     # Deduct ante
     for p in room['players']:
-        ante = min(100, p['chips'])
+        ante = min(room['ante'], p['chips'])
         p['chips'] -= ante
         room['pot'] += ante
         
@@ -239,15 +286,35 @@ async def start_game(sid, room_id):
     
     await sio.emit('game_state_updated', room, room=room_id)
     
+    # Auto-skip consecutive cards logic
+    card1, card2 = room['current_cards']
+    gap = abs(card1 - card2)
+    
+    if gap == 1:
+        await asyncio.sleep(3.0)
+        curr_player = room['players'][room['turn_index']]
+        await sio.emit('turn_result', {
+            'message': f"{curr_player['name']} got consecutive cards. Auto-skipped!",
+            'cards': [card1, card1, card2],
+            'amount_won_lost': 0
+        }, room=room_id)
+        await asyncio.sleep(1.5)
+        await advance_turn(room_id)
+        return
+    
     # Trigger bot if it's bot's turn
     if room['players'][0].get('is_bot'):
         asyncio.create_task(bot_play_turn(room_id))
+    else:
+        # Start timer for human player
+        room_timers[room_id] = asyncio.create_task(player_timeout_task(room_id, room['players'][0]['sid'], room['turn_index']))
 
 @sio.event
 async def place_bet(sid, data):
     room_id = data.get('room_id')
     amount = int(data.get('amount', 0))
     guess = data.get('guess')
+    is_auto = data.get('is_auto', False)
     room = rooms.get(room_id)
     
     if not room or room['status'] != "playing":
@@ -271,10 +338,10 @@ async def place_bet(sid, data):
     else:
         global_max = min(player['chips'] // 2, room['pot'])
         max_allowed = min(global_max, room['pot'] // 2) if gap == 2 else global_max
-        if max_allowed < 20:
+        if max_allowed < room['min_bet']:
             max_allowed = min(player['chips'], room['pot'])
             if gap == 2: max_allowed = min(max_allowed, room['pot'] // 2)
-        min_allowed = min(20, max_allowed)
+        min_allowed = min(room['min_bet'], max_allowed)
         
         if amount < min_allowed: return await sio.emit('error', f"Minimum bet is {min_allowed}.", to=sid)
         if amount > max_allowed: return await sio.emit('error', f"Max bet is {max_allowed}.", to=sid)
@@ -284,14 +351,17 @@ async def place_bet(sid, data):
     if gap == 0 and guess not in ['high', 'low']:
         return await sio.emit('error', "You must guess HIGH or LOW for a pair.", to=sid)
 
-    if gap == 1:
-        bet_text = "passed on consecutive cards."
-    elif gap == 0:
-        bet_text = f"decided to bet ${amount} on {guess.upper()}."
+    # Cancel timer ONLY if it's a manual bet from the user
+    timer_task = room_timers.get(room_id)
+    if not is_auto and timer_task and timer_task != asyncio.current_task() and not timer_task.done():
+        timer_task.cancel()
+
+    if gap == 0:
+        bet_text = f"bet ${amount} on {guess.upper()}!"
     else:
-        bet_text = f"decided to bet ${amount}."
+        bet_text = f"bet ${amount}!"
         
-    await sio.emit('game_log_message', f"{player['name']} {bet_text}", room=room_id)
+    await sio.emit('bet_announced', f"{player['name']} {bet_text}", room=room_id)
     await asyncio.sleep(2.0)
     
     # Verify player is still in the active game after delay
@@ -378,12 +448,12 @@ async def advance_turn(room_id):
     if not room or room['status'] != "playing": return
     
     # Check pot, re-ante if needed
-    if room['pot'] <= 20:
+    if room['pot'] <= room['min_bet']:
         if room['pot'] < 0:
             room['pot'] = 0
         for p in room['players']:
             if p['chips'] > 0:
-                ante = min(100, p['chips'])
+                ante = min(room['ante'], p['chips'])
                 p['chips'] -= ante
                 room['pot'] += ante
                 
@@ -408,10 +478,29 @@ async def advance_turn(room_id):
     
     await sio.emit('game_state_updated', room, room=room_id)
     
+    # Auto-skip consecutive cards logic
+    card1, card2 = room['current_cards']
+    gap = abs(card1 - card2)
+    
+    if gap == 1:
+        await asyncio.sleep(3.0)
+        curr_player = room['players'][room['turn_index']]
+        await sio.emit('turn_result', {
+            'message': f"{curr_player['name']} got consecutive cards. Auto-skipped!",
+            'cards': [card1, card1, card2],
+            'amount_won_lost': 0
+        }, room=room_id)
+        await asyncio.sleep(1.5)
+        await advance_turn(room_id)
+        return
+
     # Check if next turn is a bot
     next_player = room['players'][room['turn_index']]
     if next_player.get('is_bot'):
         asyncio.create_task(bot_play_turn(room_id))
+    else:
+        # Start timer for human player
+        room_timers[room_id] = asyncio.create_task(player_timeout_task(room_id, next_player['sid'], room['turn_index']))
 
 @sio.event
 async def leave_game(sid, data):

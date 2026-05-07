@@ -33,7 +33,22 @@
                 
                 <div>
                     <label class="block text-sm font-medium text-slate-400 mb-1">Player Name</label>
-                    <input type="text" id="player-name" class="w-full bg-slate-900 border border-slate-600 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all placeholder:text-slate-600" placeholder="Player_123">
+                    <input type="text" id="player-name" class="w-full bg-slate-900 border border-slate-600 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all placeholder:text-slate-600 mb-3" placeholder="Player_123">
+                    
+                    <div class="grid grid-cols-3 gap-2 text-center text-[10px] sm:text-xs">
+                        <div class="flex flex-col gap-1">
+                            <label class="text-slate-400 font-bold uppercase">Start Chips</label>
+                            <input type="number" id="setting-chips" value="1000" step="10" class="w-full bg-slate-900 text-white px-1 py-2 rounded-lg border border-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500 text-center font-mono">
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <label class="text-slate-400 font-bold uppercase">Ante</label>
+                            <input type="number" id="setting-ante" value="100" step="10" class="w-full bg-slate-900 text-white px-1 py-2 rounded-lg border border-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500 text-center font-mono">
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <label class="text-slate-400 font-bold uppercase">Min Bet</label>
+                            <input type="number" id="setting-min" value="50" step="10" class="w-full bg-slate-900 text-white px-1 py-2 rounded-lg border border-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500 text-center font-mono">
+                        </div>
+                    </div>
                 </div>
                 
                 <button id="create-room-btn" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3.5 rounded-xl shadow-[0_0_15px_rgba(37,99,235,0.4)] transition-all active:scale-[0.98]">

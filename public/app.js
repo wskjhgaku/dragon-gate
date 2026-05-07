@@ -8,6 +8,9 @@ const waitingRoomView = document.getElementById('waiting-room-view');
 
 const playerNameInput = document.getElementById('player-name');
 const roomCodeInput = document.getElementById('room-code-input');
+const settingChipsInput = document.getElementById('setting-chips');
+const settingAnteInput = document.getElementById('setting-ante');
+const settingMinInput = document.getElementById('setting-min');
 
 const createRoomBtn = document.getElementById('create-room-btn');
 const joinRoomBtn = document.getElementById('join-room-btn');
@@ -85,7 +88,20 @@ function triggerVibration(type) {
 // ==========================================
 createRoomBtn.addEventListener('click', () => {
     const name = playerNameInput.value.trim() || 'Anonymous';
-    socket.emit('create_room', name);
+    const chips = parseInt(settingChipsInput.value) || 0;
+    const ante = parseInt(settingAnteInput.value) || 0;
+    const minBet = parseInt(settingMinInput.value) || 0;
+    
+    if (chips < ante * 2 || ante < minBet || minBet < 10) {
+        alert("Invalid settings. Rules: Chips >= Ante * 2, Ante >= Min Bet, Min Bet >= 10.");
+        return;
+    }
+    if (chips % 10 !== 0 || ante % 10 !== 0 || minBet % 10 !== 0) {
+        alert("Settings must be multiples of 10.");
+        return;
+    }
+    
+    socket.emit('create_room', { name, starting_chips: chips, ante, min_bet: minBet });
 });
 
 joinRoomBtn.addEventListener('click', () => {
@@ -304,6 +320,13 @@ socket.on('game_state_updated', (roomData) => {
         const turnPlayer = roomData.players[roomData.turn_index];
         const isMyTurn = turnPlayer.sid === socket.id;
         
+        const appContainer = document.getElementById('app-container');
+        if (isMyTurn && roomData.status === 'playing') {
+            appContainer.classList.add('ring-4', 'ring-green-500', 'ring-opacity-50', 'shadow-[0_0_30px_rgba(34,197,94,0.3)]');
+        } else {
+            appContainer.classList.remove('ring-4', 'ring-green-500', 'ring-opacity-50', 'shadow-[0_0_30px_rgba(34,197,94,0.3)]');
+        }
+        
         if (isMyTurn) {
             turnIndicator.textContent = "Your Turn!";
             turnIndicator.className = "w-full text-center py-2 text-lg font-bold tracking-wide rounded-lg bg-green-900/30 text-green-400 border border-green-500/30 shadow-[0_0_15px_rgba(74,222,128,0.2)]";
@@ -348,11 +371,11 @@ socket.on('game_state_updated', (roomData) => {
             if (me && me.chips > 0) {
                 let globalMax = Math.min(Math.floor(me.chips / 2), roomData.pot);
                 let maxAllowed = gap === 2 ? Math.min(globalMax, Math.floor(roomData.pot / 2)) : globalMax;
-                if (maxAllowed < 20) {
+                if (maxAllowed < roomData.min_bet) {
                     maxAllowed = Math.min(me.chips, roomData.pot);
                     if (gap === 2) maxAllowed = Math.min(maxAllowed, Math.floor(roomData.pot / 2));
                 }
-                let minAllowed = Math.min(20, maxAllowed);
+                let minAllowed = Math.min(roomData.min_bet, maxAllowed);
                 
                 betSlider.min = minAllowed;
                 betSlider.max = maxAllowed;
@@ -422,6 +445,11 @@ socket.on('turn_result', (data) => {
 
 socket.on('error', (message) => {
     alert(`Error: ${message}`);
+});
+
+socket.on('bet_announced', (msg) => {
+    turnIndicator.textContent = msg;
+    turnIndicator.className = "w-full text-center py-2 text-lg font-bold tracking-wide rounded-lg bg-orange-900/40 text-orange-400 border border-orange-500/50 shadow-[0_0_15px_rgba(249,115,22,0.4)] animate-pulse";
 });
 
 socket.on('game_over', (data) => {

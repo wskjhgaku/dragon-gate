@@ -322,9 +322,9 @@ socket.on('game_state_updated', (roomData) => {
         
         const appContainer = document.getElementById('app-container');
         if (isMyTurn && roomData.status === 'playing') {
-            appContainer.classList.add('ring-4', 'ring-green-500', 'ring-opacity-50', 'shadow-[0_0_30px_rgba(34,197,94,0.3)]');
+            appContainer.classList.add('ring-4', 'ring-inset', 'ring-green-500', 'ring-opacity-50', 'shadow-[inset_0_0_30px_rgba(34,197,94,0.3)]');
         } else {
-            appContainer.classList.remove('ring-4', 'ring-green-500', 'ring-opacity-50', 'shadow-[0_0_30px_rgba(34,197,94,0.3)]');
+            appContainer.classList.remove('ring-4', 'ring-inset', 'ring-green-500', 'ring-opacity-50', 'shadow-[inset_0_0_30px_rgba(34,197,94,0.3)]');
         }
         
         if (isMyTurn) {

@@ -77,7 +77,7 @@ async def remove_player_from_room(sid, room_id):
                 room_data['host_sid'] = players[0]['sid']
             
             if room_data['status'] == 'playing':
-                active_players = [p for p in players if p['chips'] > 0]
+                active_players = [p for p in players if p['chips'] >= room_data['min_bet']]
                 if len(active_players) <= 1:
                     await trigger_game_over(room_id)
                 else:
@@ -452,12 +452,12 @@ async def advance_turn(room_id):
         if room['pot'] < 0:
             room['pot'] = 0
         for p in room['players']:
-            if p['chips'] > 0:
+            if p['chips'] >= room['min_bet']:
                 ante = min(room['ante'], p['chips'])
                 p['chips'] -= ante
                 room['pot'] += ante
                 
-    active_players = [p for p in room['players'] if p['chips'] > 0]
+    active_players = [p for p in room['players'] if p['chips'] >= room['min_bet']]
     if len(active_players) <= 1:
         await trigger_game_over(room_id)
         return
@@ -465,7 +465,7 @@ async def advance_turn(room_id):
     original_idx = room['turn_index']
     while True:
         room['turn_index'] = (room['turn_index'] + 1) % len(room['players'])
-        if room['players'][room['turn_index']]['chips'] > 0:
+        if room['players'][room['turn_index']]['chips'] >= room['min_bet']:
             break
         if room['turn_index'] == original_idx:
             break

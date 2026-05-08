@@ -310,7 +310,7 @@ socket.on('game_state_updated', (roomData) => {
         if (me) {
             currentMyChips = me.chips;
             gameChips.textContent = `$${me.chips}`;
-            if (me.chips <= 0) {
+            if (me.chips < roomData.min_bet) {
                 bankruptBtn.classList.remove('hidden');
             } else {
                 bankruptBtn.classList.add('hidden');
